@@ -4,16 +4,16 @@ import numpy as np
 from keras.layers import InputLayer
 import requests
 import pandas as pd
-from transformers import pipeline
+import google.generativeai as genai
+
 
 API_URL = "https://trackapi.nutritionix.com/v2/natural/nutrients"
 APP_ID = "d6dcf9c3"  # Replace with your Nutritionix app_id
 APP_KEY = "1bdeefeb98c792ce9de0c4f3c15197cd"  # Replace with your Nutritionix app_key
 
+GOOGLE_API_KEY = "AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY"
 
-# Use distilgpt2 for lightweight LLM
-llm = pipeline('text-generation', model='EleutherAI/gpt-neo-125M', framework='pt')
-
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 def get_nutritional_info(item):
     headers = {
@@ -50,10 +50,10 @@ def model_prediction(test_image):
     
     return predicted_class, confidence_score
 
-def generate_diet_recommendation(predicted_food, goal):
-    prompt = f"Generate a balanced diet for {goal} that includes or excludes {predicted_food}."
-    recommendation = llm(prompt, max_length=100)[0]['generated_text']
-    return recommendation
+def get_diet_recommendation(predicted_food, health_goal, GOOGLE_API_KEY):
+    response = model.generate_content("Create a balanced diet plan based on the following criteria: - **Health Goal**: {health_goal} - **Predicted Food**: {predicted_food}. Please provide a detailed meal plan that aligns with the specified health goal. Also, indicate whether the predicted food should be included in the diet plan or excluded, and provide reasons for this recommendation. Include alternative food suggestions if the predicted food is excluded. For the diet plan: - Suggest meals and snacks. - Include portion sizes and frequency of consumption. - Ensure the plan is nutritionally balanced and meets the health goal specified.")
+    return response
+    
 
 st.sidebar.title("Sidebar")
 app_mode = st.sidebar.selectbox("Select Page", ["Home", "About NutriFinder", "Prediction"])
@@ -143,10 +143,11 @@ elif app_mode == "Prediction":
                     # Display the table
                     st.table(nutrition_df.style.hide(axis="index"))
             st.subheader("Personalized Diet Recommendation")
+            health_goal = "Muscle Building"
             health_goal = st.radio("Select Your Health Goal", ("Muscle Building", "Fat Loss", "Weight Gain"))
 
             # Generate diet recommendation based on the predicted food item and health goal
-            recommendation = generate_diet_recommendation(predicted_item, health_goal)
+            recommendation = get_diet_recommendation(predicted_item, health_goal, GOOGLE_API_KEY)
             st.write(f"Based on your goal for {health_goal}, here's a balanced diet recommendation:")
             st.write(recommendation)
     else:

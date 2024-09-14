@@ -4,3 +4,4 @@ keras
 requests
 pandas
 transformers
+google-generativeai
