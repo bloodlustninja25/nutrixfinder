@@ -11,6 +11,8 @@ API_URL = "https://trackapi.nutritionix.com/v2/natural/nutrients"
 APP_ID = "d6dcf9c3"  # Replace with your Nutritionix app_id
 APP_KEY = "1bdeefeb98c792ce9de0c4f3c15197cd"  # Replace with your Nutritionix app_key
 
+genai.configure(api_key="AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY")
+
 GOOGLE_API_KEY = "AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY"
 
 model = genai.GenerativeModel("gemini-1.5-flash")
@@ -50,9 +52,9 @@ def model_prediction(test_image):
     
     return predicted_class, confidence_score
 
-def get_diet_recommendation(predicted_food, health_goal, GOOGLE_API_KEY):
-    response = model.generate_content("Create a balanced diet plan based on the following criteria: - **Health Goal**: {health_goal} - **Predicted Food**: {predicted_food}. Please provide a detailed meal plan that aligns with the specified health goal. Also, indicate whether the predicted food should be included in the diet plan or excluded, and provide reasons for this recommendation. Include alternative food suggestions if the predicted food is excluded. For the diet plan: - Suggest meals and snacks. - Include portion sizes and frequency of consumption. - Ensure the plan is nutritionally balanced and meets the health goal specified.")
-    return response
+def get_diet_recommendation(predicted_item, health_goal, GOOGLE_API_KEY):
+    response = model.generate_content(f"Create a balanced diet plan based on the following criteria: - **Health Goal**: {health_goal} - **Predicted Food**: {predicted_item}. Please provide a detailed meal plan that aligns with the specified health goal and also include veg options. Also, indicate whether the predicted food should be included in the diet plan or excluded, and provide reasons for this recommendation. Include alternative food suggestions if the predicted food is excluded. For the diet plan: - Suggest meals and snacks. - Include portion sizes and frequency of consumption. - Ensure the plan is nutritionally balanced and meets the health goal specified. Stick to Indian recipes and measurment units")
+    return response.text
     
 
 st.sidebar.title("Sidebar")
