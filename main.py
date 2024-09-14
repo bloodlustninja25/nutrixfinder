@@ -5,16 +5,9 @@ from keras.layers import InputLayer
 import requests
 import pandas as pd
 import google.generativeai as genai
+import config.py
 
-
-API_URL = "https://trackapi.nutritionix.com/v2/natural/nutrients"
-APP_ID = "d6dcf9c3"  # Replace with your Nutritionix app_id
-APP_KEY = "1bdeefeb98c792ce9de0c4f3c15197cd"  # Replace with your Nutritionix app_key
-
-genai.configure(api_key="AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY")
-
-GOOGLE_API_KEY = "AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY"
-
+genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 def get_nutritional_info(item):
