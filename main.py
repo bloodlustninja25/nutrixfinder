@@ -5,9 +5,9 @@ from keras.layers import InputLayer
 import requests
 import pandas as pd
 import google.generativeai as genai
-import os
-import sys
-import config
+from gtts import gTTS
+import tempfile
+
 
 API_URL = "https://trackapi.nutritionix.com/v2/natural/nutrients"
 APP_ID = "d6dcf9c3"  # Replace with your Nutritionix app_id
@@ -54,7 +54,7 @@ def model_prediction(test_image):
     return predicted_class, confidence_score
 
 def get_diet_recommendation(predicted_item, health_goal, GOOGLE_API_KEY):
-    response = model.generate_content(f"Create a balanced diet plan based on the following criteria: - **Health Goal**: {health_goal} - **Predicted Food**: {predicted_item}. Please provide a detailed meal plan that aligns with the specified health goal and also include veg options. Also, indicate whether the predicted food should be included in the diet plan or excluded, and provide reasons for this recommendation. Include alternative food suggestions if the predicted food is excluded. For the diet plan: - Suggest meals and snacks. - Include portion sizes and frequency of consumption. - Ensure the plan is nutritionally balanced and meets the health goal specified. Stick to Indian recipes and measurment units")
+    response = model.generate_content(f"Create a balanced diet plan based on the following criteria: - **Health Goal**: {health_goal} - **Predicted Food**: {predicted_item}. Please provide a detailed meal plan that aligns with the specified health goal and also include veg options. Also, indicate whether the predicted food should be included in the diet plan or excluded, and provide reasons for this recommendation. Include alternative food suggestions if the predicted food is excluded. For the diet plan: - Suggest meals and snacks. - Include portion sizes and frequency of consumption. - Ensure the plan is nutritionally balanced and meets the health goal specified. Stick to Indian recipes and measurement units.")
     return response.text
     
 
@@ -133,22 +133,58 @@ elif app_mode == "Prediction":
 
     # If prediction is made, show the results and health goal selection
     if st.session_state.prediction_made:
-        # Display the prediction and confidence score
-        predicted_item = st.session_state.predicted_item
-        confidence_score = st.session_state.confidence_score
+    # Display the prediction and confidence score
 
-        st.success(f"NutriFinder is predicting it's a {predicted_item} with {confidence_score * 100:.2f}% confidence.")
-        
+        st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item} with {st.session_state.confidence_score * 100:.2f}% confidence.")
+        # Display key nutritional values
+        nutrition_data = get_nutritional_info(st.session_state.predicted_item)
+        if nutrition_data:
+                st.subheader(f"Nutritional Information for {st.session_state.predicted_item.capitalize()}:")
+                for food in nutrition_data['foods']:
+                    serving_qty = food['serving_qty']
+                    serving_unit = food['serving_unit']
+                    serving_weight = food['serving_weight_grams']
+                    
+                    # Create a dictionary with nutritional values
+                    nutrition_info = {
+                        "Nutrient": ["Serving Size", "Calories (kcal)", "Total Fat (g)", "Carbohydrates (g)", "Protein (g)"],
+                        "Value": [
+                            f"{serving_qty} {serving_unit} ({serving_weight} g)",
+                            food['nf_calories'],
+                            food['nf_total_fat'],
+                            food['nf_total_carbohydrate'],
+                            food['nf_protein']
+                        ]
+                    }
+                    
+                    # Convert the dictionary into a DataFrame for a better table display
+                    nutrition_df = pd.DataFrame(nutrition_info)
+                    
+                    # Display the table
+                    st.table(nutrition_df)
         # Capture the user's health goal using st.radio() here, and store it in session state
         st.subheader("Personalized Diet Recommendation")
         st.session_state.health_goal = st.radio("Select Your Health Goal", 
                                                 ("Select your health goal", "Muscle Building", "Fat Loss", "Weight Gain"), 
                                                 index=("Select your health goal", "Muscle Building", "Fat Loss", "Weight Gain").index(st.session_state.health_goal))
         
-        if st.session_state.health_goal == "Select your health goal":
-            st.warning("Please select a valid health goal to proceed.")
-        else:
-            # Generate diet recommendation based on the predicted food item and health goal
-            recommendation = get_diet_recommendation(st.session_state.predicted_item, st.session_state.health_goal, GOOGLE_API_KEY)
-            st.write(f"Based on your goal for {st.session_state.health_goal}, here's a balanced diet recommendation:")
-            st.write(recommendation)
+    if st.session_state.health_goal == "Select your health goal":
+        st.warning("Please select a valid health goal to proceed.")
+    else:
+        # Generate diet recommendation based on the predicted food item and health goal
+        recommendation = get_diet_recommendation(st.session_state.predicted_item, st.session_state.health_goal, GOOGLE_API_KEY)
+        st.write(f"Based on your goal for {st.session_state.health_goal}, here's a balanced diet recommendation:")
+        st.write(recommendation)
+
+        # TTS and audio file handling
+        output_text = f"NutriFinder is predicting it's a {st.session_state.predicted_item} with {st.session_state.confidence_score * 100:.2f}% confidence." + recommendation
+        
+        # Use a temporary file for saving the TTS output
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio_file:
+            tts = gTTS(output_text, slow=False)
+            tts.save(temp_audio_file.name)  # Save the TTS output to the temporary file path
+            
+            # Read the file and play the audio in the Streamlit app
+            audio_bytes = temp_audio_file.read()
+            st.markdown("## Your diet recommendation in audio format:")
+            st.audio(temp_audio_file.name, format="audio/mp3")
