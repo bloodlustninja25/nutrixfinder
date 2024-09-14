@@ -58,11 +58,29 @@ def get_diet_recommendation(predicted_item, health_goal, GOOGLE_API_KEY):
     return response.text
     
 
+# Initialize session state variables if not present
+if "test_image" not in st.session_state:
+    st.session_state.test_image = None
+
+if "prediction_made" not in st.session_state:
+    st.session_state.prediction_made = False  # Track if the prediction has been made
+
+if "predicted_item" not in st.session_state:
+    st.session_state.predicted_item = None
+
+if "confidence_score" not in st.session_state:
+    st.session_state.confidence_score = None
+
+if "health_goal" not in st.session_state:
+    st.session_state.health_goal = "Select your health goal"
+
+# Sidebar selection for pages
 st.sidebar.title("Sidebar")
 app_mode = st.sidebar.selectbox("Select Page", ["Home", "About NutriFinder", "Prediction"])
 
 if app_mode == "Home":
     st.header("NutriFinder")
+    st.write("Welcome to NutriFinder! A place to get nutrition information and personalized diet recommendations.")
 
 elif app_mode == "About NutriFinder":
     st.header("About NutriFinder")
@@ -79,77 +97,58 @@ elif app_mode == "About NutriFinder":
 elif app_mode == "Prediction":
     st.header("Model Prediction")
 
-    # Initialize session state variables if not present
-if "test_image" not in st.session_state:
-    st.session_state.test_image = None
+    # Ask the user if they want to use the camera or upload an image
+    use_camera = st.radio("How would you like to provide the image?", ("Upload an Image", "Use Camera"))
 
-if "prediction_made" not in st.session_state:
-    st.session_state.prediction_made = False  # Track if the prediction has been made
+    if use_camera == "Use Camera":
+        st.info("Please turn on your camera to capture an image.")
+        test_image_cam = st.camera_input("Take a picture")
+        if test_image_cam is not None:
+            st.session_state.test_image = test_image_cam  # Save the image in session state
+            if st.button("Show Image", key="cam"):
+                st.image(st.session_state.test_image, use_column_width=True)
 
-if "predicted_class" not in st.session_state:
-    st.session_state.predicted_class = None
+    elif use_camera == "Upload an Image":
+        test_image_up = st.file_uploader("Choose an Image:")
+        if test_image_up is not None:
+            st.session_state.test_image = test_image_up  # Save the image in session state
+            if st.button("Show Image", key="upload"):
+                st.image(st.session_state.test_image, use_column_width=True)
 
-if "confidence_score" not in st.session_state:
-    st.session_state.confidence_score = None
+    # Only show the Predict button if an image is uploaded/captured
+    if st.session_state.test_image is not None:
+        if st.button("Predict"):
+            # Run the model prediction
+            st.write("NutriFinder's Prediction")
+            result_index, confidence_score = model_prediction(st.session_state.test_image)
 
-if "health_goal" not in st.session_state:
-    st.session_state.health_goal = "Select your health goal"
-
-# Ask the user if they want to use the camera or upload an image
-use_camera = st.radio("How would you like to provide the image?", ("Upload an Image", "Use Camera"))
-
-if use_camera == "Use Camera":
-    st.info("Please turn on your camera to capture an image.")
-    test_image_cam = st.camera_input("Take a picture")
-    if test_image_cam is not None:
-        st.session_state.test_image = test_image_cam  # Save the image in session state
-        if st.button("Show Image", key="cam"):
-            st.image(st.session_state.test_image, use_column_width=True)
-
-elif use_camera == "Upload an Image":
-    test_image_up = st.file_uploader("Choose an Image:")
-    if test_image_up is not None:
-        st.session_state.test_image = test_image_up  # Save the image in session state
-        if st.button("Show Image", key="upload"):
-            st.image(st.session_state.test_image, use_column_width=True)
-
-# Only show the Predict button if an image is uploaded/captured
-if st.session_state.test_image is not None:
-    if st.button("Predict"):
-        # Run the model prediction
-        st.write("NutriFinder's Prediction")
-        result_index, confidence_score = model_prediction(st.session_state.test_image)
-
-        with open("labels.txt") as f:
+            with open("labels.txt") as f:
                 content = f.readlines()
-        label = [i.strip() for i in content]  # Use .strip() to remove newline characters
+            label = [i.strip() for i in content]  # Use .strip() to remove newline characters
 
-        # Save the prediction and confidence score in session state
-        st.session_state.predicted_item = label[result_index]
-        st.session_state.confidence_score = confidence_score
-        st.session_state.prediction_made = True  # Mark that prediction has been made
+            # Save the prediction and confidence score in session state
+            st.session_state.predicted_item = label[result_index]
+            st.session_state.confidence_score = confidence_score
+            st.session_state.prediction_made = True  # Mark that prediction has been made
 
-# If prediction is made, show the results and health goal selection
-if st.session_state.prediction_made:
-    # Display the prediction and confidence score
-    predicted_item = st.session_state.predicted_item
-    confidence_score = st.session_state.confidence_score
+    # If prediction is made, show the results and health goal selection
+    if st.session_state.prediction_made:
+        # Display the prediction and confidence score
+        predicted_item = st.session_state.predicted_item
+        confidence_score = st.session_state.confidence_score
 
-    st.success(f"NutriFinder is predicting it's a {predicted_item} with {confidence_score * 100:.2f}% confidence.")
-    
-    # Capture the user's health goal using st.radio() here, and store it in session state
-    st.subheader("Personalized Diet Recommendation")
-    st.session_state.health_goal = st.radio("Select Your Health Goal", 
-                                            ("Select your health goal", "Muscle Building", "Fat Loss", "Weight Gain"), 
-                                            index=("Select your health goal", "Muscle Building", "Fat Loss", "Weight Gain").index(st.session_state.health_goal))
-    
-    if st.session_state.health_goal == "Select your health goal":
-        st.warning("Please select a valid health goal to proceed.")
-    else:
-        # Generate diet recommendation based on the predicted food item and health goal
-        recommendation = get_diet_recommendation(st.session_state.predicted_item, st.session_state.health_goal, GOOGLE_API_KEY)
-        st.write(f"Based on your goal for {st.session_state.health_goal}, here's a balanced diet recommendation:")
-        st.write(recommendation)
-
-else:
-    st.error("Please upload or capture an image before making a prediction.")
+        st.success(f"NutriFinder is predicting it's a {predicted_item} with {confidence_score * 100:.2f}% confidence.")
+        
+        # Capture the user's health goal using st.radio() here, and store it in session state
+        st.subheader("Personalized Diet Recommendation")
+        st.session_state.health_goal = st.radio("Select Your Health Goal", 
+                                                ("Select your health goal", "Muscle Building", "Fat Loss", "Weight Gain"), 
+                                                index=("Select your health goal", "Muscle Building", "Fat Loss", "Weight Gain").index(st.session_state.health_goal))
+        
+        if st.session_state.health_goal == "Select your health goal":
+            st.warning("Please select a valid health goal to proceed.")
+        else:
+            # Generate diet recommendation based on the predicted food item and health goal
+            recommendation = get_diet_recommendation(st.session_state.predicted_item, st.session_state.health_goal, GOOGLE_API_KEY)
+            st.write(f"Based on your goal for {st.session_state.health_goal}, here's a balanced diet recommendation:")
+            st.write(recommendation)
