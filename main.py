@@ -7,6 +7,7 @@ import pandas as pd
 import google.generativeai as genai
 from gtts import gTTS
 import tempfile
+import re
 
 
 API_URL = "https://trackapi.nutritionix.com/v2/natural/nutrients"
@@ -17,6 +18,12 @@ GOOGLE_API_KEY = "AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY"
 genai.configure(api_key="AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY")
 
 model = genai.GenerativeModel("gemini-1.5-flash")
+
+def clean_text(text):
+    # Remove markdown special characters like #, *, and excess whitespace
+    clean_text = re.sub(r'[#*]', '', text)
+    clean_text = re.sub(r'\s+', ' ', clean_text).strip()  # Remove excess spaces
+    return clean_text
 
 def get_nutritional_info(item):
     headers = {
@@ -163,11 +170,11 @@ elif app_mode == "Prediction":
         st.write(recommendation)
 
         output_text = f"NutriFinder is predicting it's a {st.session_state.predicted_item} with {st.session_state.confidence_score * 100:.2f}% confidence." + recommendation
-        
+        cleaned_output_text = clean_text(output_text)
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio_file:
-            tts = gTTS(output_text, slow=False)
+            tts = gTTS(cleaned_output_text, slow=False)
             tts.save(temp_audio_file.name)
-            
             audio_bytes = temp_audio_file.read()
             st.markdown("## Your diet recommendation in audio format:")
             st.audio(temp_audio_file.name, format="audio/mp3")
