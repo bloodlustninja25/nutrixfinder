@@ -1,7 +1,8 @@
+# Imports
+
 import streamlit as st
 import tensorflow as tf
 import numpy as np
-from keras.layers import InputLayer
 import requests
 import pandas as pd
 import google.generativeai as genai
@@ -14,23 +15,34 @@ import tflearn
 from tflearn.layers.conv import conv_2d, max_pool_2d
 from tflearn.layers.core import input_data, dropout, fully_connected
 from tflearn.layers.estimator import regression
+import io
+from PIL import Image
 
+# Nutritionix and Genai Config
 
 API_URL = "https://trackapi.nutritionix.com/v2/natural/nutrients"
 APP_ID = "d6dcf9c3" 
 APP_KEY = "1bdeefeb98c792ce9de0c4f3c15197cd"
 GOOGLE_API_KEY = "AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY"
 
+
 genai.configure(api_key="AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY")
 
 model = genai.GenerativeModel("gemini-1.5-flash")
 
+IMG_SIZE = 400
+LR = 1e-3
+no_of_fruits=7
+
+
+# For TTS
 def clean_text(text):
     # Remove markdown special characters like #, *, and excess whitespace
     clean_text = re.sub(r'[#*]', '', text)
     clean_text = re.sub(r'\s+', ' ', clean_text).strip()  # Remove excess spaces
     return clean_text
 
+# access nutritionix api
 def get_nutritional_info(item):
     headers = {
         'x-app-id': APP_ID,
@@ -49,10 +61,11 @@ def get_nutritional_info(item):
     else:
         st.error(f"Error: Unable to retrieve nutritional information for {item}")
         return None
-
+    
+# Get area of the food
 
 #image_segment
-def getAreaOfFood(img1):
+def getAreaOfFood(image):
     data=os.path.join(os.getcwd(),"images")
     if os.path.exists(data):
         print('folder exist for images at ',data)
@@ -60,8 +73,8 @@ def getAreaOfFood(img1):
         os.mkdir(data)
         print('folder created for images at ',data)
         
-    cv2.imwrite('{}\\1 original image.jpg'.format(data),img1)
-    img = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+    cv2.imwrite('{}\\1 original image.jpg'.format(data),image)
+    img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     cv2.imwrite('{}\\2 original image BGR2GRAY.jpg'.format(data),img)
     img_filt = cv2.medianBlur( img, 5)
     cv2.imwrite('{}\\3 img_filt.jpg'.format(data),img_filt)
@@ -75,7 +88,7 @@ def getAreaOfFood(img1):
     largest_areas = sorted(contours, key=cv2.contourArea)
     cv2.drawContours(mask, [largest_areas[-1]], 0, (255,255,255,255), -1)
     cv2.imwrite('{}\\5 mask.jpg'.format(data),mask)
-    img_bigcontour = cv2.bitwise_and(img1,img1,mask = mask)
+    img_bigcontour = cv2.bitwise_and(image,image,mask = mask)
     cv2.imwrite('{}\\6 img_bigcontour.jpg'.format(data),img_bigcontour)
 
 	# convert to hsv. otsu threshold in s to remove plate
@@ -122,7 +135,7 @@ def getAreaOfFood(img1):
     kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
     mask_fruit2 = cv2.dilate(mask_fruit,kernel2,iterations = 1)
     cv2.imwrite('{}\\20 mask_fruit2.jpg'.format(data),mask_fruit2)
-    fruit_final = cv2.bitwise_and(img1,img1,mask = mask_fruit2)
+    fruit_final = cv2.bitwise_and(image,image,mask = mask_fruit2)
     cv2.imwrite('{}\\21 fruit_final.jpg'.format(data),fruit_final)
     
 	#find area of fruit
@@ -164,20 +177,9 @@ def getAreaOfFood(img1):
     
     return fruit_area,fruit_bin ,fruit_final,skin_area, fruit_contour, pix_to_cm_multiplier
 
-#caleries
-#density - gram / cm^3
 density_dict = { 1:0.609, 2:0.94, 3:0.641,  4:0.641,5:0.513, 6:0.482,7:0.481}
-#kcal
-calorie_dict = { 1:52, 2:89,  3:41,4:16,5:40,6:47,7:18 }
-#skin of photo to real multiplier
-skin_multiplier = 5*2.3
 
-def getCalorie(label, volume): #volume in cm^3
-	calorie = calorie_dict[int(label)]
-	density = density_dict[int(label)]
-	mass = volume*density*1.0
-	calorie_tot = (calorie/100.0)*mass
-	return mass, calorie_tot, calorie #calorie per 100 grams
+skin_multiplier = 5*2.3
 
 def getVolume(label, area, skin_area, pix_to_cm_multiplier, fruit_contour):
 	area_fruit = (area/skin_area)*skin_multiplier #area in cm^2
@@ -199,19 +201,19 @@ def getVolume(label, area, skin_area, pix_to_cm_multiplier, fruit_contour):
 	
 	return volume
 
-def calories(result,img):
-    img_path =img # "C:/Users/M Sc-2/Desktop/dataset/FooD/"+str(j)+"_"+str(i)+".jpg"
+def getMass(label, volume): #volume in cm^3
+	density = density_dict[int(label)]
+	mass = volume*density*1.0
+	return mass #mass
+
+def mass_main(result,img):
+    img_path =img
     fruit_areas,final_f,areaod,skin_areas, fruit_contours, pix_cm = getAreaOfFood(img_path)
     volume = getVolume(result, fruit_areas, skin_areas, pix_cm, fruit_contours)
-    mass, cal, cal_100 = getCalorie(result, volume)
+    mass = getMass(result, volume)
     fruit_volumes=volume
-    fruit_calories=cal
-    fruit_calories_100grams=cal_100
     fruit_mass=mass
-    #print("\nfruit_volumes",fruit_volumes,"\nfruit_calories",fruit_calories,"\nruit_calories_100grams",fruit_calories_100grams,"\nfruit_mass",fruit_mass)
     return fruit_mass
-
-#cnn_model
 
 def get_model(IMG_SIZE,no_of_fruits,LR):
 	try:
@@ -248,11 +250,7 @@ def get_model(IMG_SIZE,no_of_fruits,LR):
 
 	return model
 
-def get_info:
-    IMG_SIZE = 400
-    LR = 1e-3
-    no_of_fruits=7
-
+def get_name_mass(test_data):
     MODEL_NAME = 'Fruits_dectector-{}-{}.model'.format(LR, '5conv-basic')
 
     model_save_at=os.path.join("model",MODEL_NAME)
@@ -261,32 +259,25 @@ def get_info:
 
     model.load(model_save_at)
     labels=list(np.load('labels.npy'))
-
-    test_data='test_image.JPG'
+    
     img=cv2.imread(test_data)
     img1=cv2.resize(img,(IMG_SIZE,IMG_SIZE))
     model_out=model.predict([img1])
     result=np.argmax(model_out)
     name=labels[result]
     mass=round(mass(result+1,img),2)
-    return mass, name
+    
+    return name, mass
 
-# def model_prediction(test_image):
-#     model = tf.keras.models.load_model('updated_model.keras')
-#     image = tf.keras.preprocessing.image.load_img(test_image, target_size=(64, 64))
-#     input_arr = tf.keras.preprocessing.image.img_to_array(image)
-#     input_arr = np.array([input_arr])
-    
-#     predictions = model.predict(input_arr)
-#     predicted_class = np.argmax(predictions)
-#     confidence_score = np.max(predictions)
-    
-#     return predicted_class, confidence_score
+
 
 def get_diet_recommendation(predicted_item, health_goal, GOOGLE_API_KEY):
     response = model.generate_content(f"Create a balanced diet plan based on the following criteria: - **Health Goal**: {health_goal} - **Predicted Food**: {predicted_item}. Please provide a detailed meal plan that aligns with the specified health goal and also include veg options. Also, indicate whether the predicted food should be included in the diet plan or excluded, and provide reasons for this recommendation. Include alternative food suggestions if the predicted food is excluded. For the diet plan: - Suggest meals and snacks. - Include portion sizes and frequency of consumption. - Ensure the plan is nutritionally balanced and meets the health goal specified. Stick to Indian recipes and measurement units.")
     return response.text
     
+
+
+# Streamlit part
 
 if "test_image" not in st.session_state:
     st.session_state.test_image = None
@@ -345,18 +336,25 @@ elif app_mode == "Prediction":
                 st.image(st.session_state.test_image, use_column_width=True)
 
     if st.session_state.test_image is not None:
+        if isinstance(st.session_state.test_image, bytes):  # Camera input gives bytes
+                img = Image.open(io.BytesIO(st.session_state.test_image))
+        else:  # File uploader gives a file-like object
+                img = Image.open(st.session_state.test_image)
+        img_array = np.array(img)
+
         if st.button("Predict"):
             st.write("NutriFinder's Prediction")
-            result_index, result_mass = get_info(st.session_state.test_image)
+            
+            result_name, result_mass = get_name_mass(img_array)
 
-            st.session_state.predicted_item = result_index
-            st.session_state.mass = mass
+            st.session_state.predicted_item = result_name
+            st.session_state.mass = result_mass
             st.session_state.prediction_made = True
 
     if st.session_state.prediction_made:
 
-        st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item} of {st.session_state.mass:.2f}gms mass.")
-        nutrition_data = get_nutritional_info(st.session_state.predicted_item, mass)
+        st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item} of {st.session_state.mass:.2f} gms mass.")
+        nutrition_data = get_nutritional_info(st.session_state.predicted_item, result_mass)
         if nutrition_data:
                 st.subheader(f"Nutritional Information for {st.session_state.predicted_item.capitalize()}:")
                 for food in nutrition_data['foods']:
@@ -368,10 +366,10 @@ elif app_mode == "Prediction":
                         "Nutrient": ["Serving Size", "Calories (kcal)", "Total Fat (g)", "Carbohydrates (g)", "Protein (g)"],
                         "Value": [
                             f"{serving_qty} {serving_unit} ({serving_weight} g)",
-                            round(food['nf_calories'] / serving_weight * mass, 2),
-                            round(food['nf_total_fat'] / serving_weight * mass, 2),
-                            round(food['nf_total_carbohydrate'] / serving_weight * mass, 2),
-                            round(food['nf_protein'] / serving_weight * mass, 2)
+                            round(food['nf_calories'] / serving_weight * result_mass, 2),
+                            round(food['nf_total_fat'] / serving_weight * result_mass, 2),
+                            round(food['nf_total_carbohydrate'] / serving_weight * result_mass, 2),
+                            round(food['nf_protein'] / serving_weight * result_mass, 2)
                         ]
                     }
 
