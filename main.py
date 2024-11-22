@@ -32,14 +32,19 @@ model = genai.GenerativeModel("gemini-1.5-flash")
 
 IMG_SIZE = 400
 LR = 1e-3
-no_of_fruits=7
 
+with open('labels.txt', 'r') as file:
+    labels = [line.strip() for line in file.readlines()]
 
-# For TTS
+# Density dictionary (based on your previous setup)
+density_dict = {
+    'apple': 0.609, 'banana': 0.94, 'carrot': 0.481, 'orange': 0.512, 'tomato': 0.485, 'onion': 0.513, 'cucumber': 0.641
+}
+
+# Clean text for TTS
 def clean_text(text):
-    # Remove markdown special characters like #, *, and excess whitespace
     clean_text = re.sub(r'[#*]', '', text)
-    clean_text = re.sub(r'\s+', ' ', clean_text).strip()  # Remove excess spaces
+    clean_text = re.sub(r'\s+', ' ', clean_text).strip()
     return clean_text
 
 # access nutritionix api
@@ -55,13 +60,21 @@ def get_nutritional_info(item):
     }
     
     response = requests.post(API_URL, headers=headers, json=data)
-    
     if response.status_code == 200:
         return response.json()
     else:
         st.error(f"Error: Unable to retrieve nutritional information for {item}")
         return None
-    
+
+# Load the TensorFlow model
+def load_model():
+    try:
+        model = tf.keras.models.load_model("updated_model.keras")
+        return model
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        return None
+
 # Get area of the food
 
 #image_segment
@@ -177,20 +190,19 @@ def getAreaOfFood(image):
     
     return fruit_area,fruit_bin ,fruit_final,skin_area, fruit_contour, pix_to_cm_multiplier
 
-density_dict = { 1:0.609, 2:0.94, 3:0.641,  4:0.641,5:0.513, 6:0.482,7:0.481}
 
 skin_multiplier = 5*2.3
 
 def getVolume(label, area, skin_area, pix_to_cm_multiplier, fruit_contour):
 	area_fruit = (area/skin_area)*skin_multiplier #area in cm^2
-	label = int(label)
+    label = labels[label]
 	volume = 100
-	if label == 1 or label == 5 or label == 7 or label == 6 : #sphere-apple,tomato,orange,kiwi,onion
+	if label in ['apple', 'orange', 'kiwi', 'tomato', 'onion'] : #sphere-apple,tomato,orange,kiwi,onion
 		radius = np.sqrt(area_fruit/np.pi)
 		volume = (4/3)*np.pi*radius*radius*radius
 		#print (area_fruit, radius, volume, skin_area)
-	
-	if label == 2 or label == 4 or (label == 3 and area_fruit > 30): #cylinder like banana, cucumber, carrot
+    
+	elif label in ['banana', 'cucumber', 'carrot']: #cylinder like banana, cucumber, carrot
 		fruit_rect = cv2.minAreaRect(fruit_contour)
 		height = max(fruit_rect[1])*pix_to_cm_multiplier
 		radius = area_fruit/(2.0*height)
@@ -201,10 +213,15 @@ def getVolume(label, area, skin_area, pix_to_cm_multiplier, fruit_contour):
 	
 	return volume
 
-def getMass(label, volume): #volume in cm^3
-	density = density_dict[int(label)]
-	mass = volume*density*1.0
-	return mass #mass
+def getMass(label, volume):  # volume in cm^3
+    if label in density_dict:
+        density = density_dict[label]
+        mass = volume * density * 1.0
+        return mass  # mass
+    else:
+        # If the item is not in density_dict, return None or a placeholder value
+        return None
+
 
 def mass_main(result,img):
     img_path =img
@@ -215,60 +232,27 @@ def mass_main(result,img):
     fruit_mass=mass
     return fruit_mass
 
-def get_model(IMG_SIZE,no_of_fruits,LR):
-	try:
-		tf.reset_default_graph()
-	except:
-		print("tensorflow")
-	convnet = input_data(shape=[None, IMG_SIZE, IMG_SIZE, 3], name='input')
+def get_name_mass(test_image):
+    model = load_model()
+    img = cv2.imread(test_image)
+    img_resized = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
 
-	convnet = conv_2d(convnet, 32, 5, activation='relu')
-
-	convnet = max_pool_2d(convnet, 5)
-
-	convnet = conv_2d(convnet, 64, 5, activation='relu')
-
-	convnet = max_pool_2d(convnet, 5)
-
-	convnet = conv_2d(convnet, 128, 5, activation='relu')
-	convnet = max_pool_2d(convnet, 5)
-
-	convnet = conv_2d(convnet, 64, 5, activation='relu')
-	convnet = max_pool_2d(convnet, 5)
-
-
-	convnet = conv_2d(convnet, 32, 5, activation='relu')
-	convnet = max_pool_2d(convnet, 5)
-
-	convnet = fully_connected(convnet, 1024, activation='relu')
-	convnet = dropout(convnet, 0.8)
-
-	convnet = fully_connected(convnet, no_of_fruits, activation='softmax')
-	convnet = regression(convnet, optimizer='adam', learning_rate=LR, loss='categorical_crossentropy', name='targets')
-
-	model = tflearn.DNN(convnet, tensorboard_dir='log')
-
-	return model
-
-def get_name_mass(test_data):
-    MODEL_NAME = 'Fruits_dectector-{}-{}.model'.format(LR, '5conv-basic')
-
-    model_save_at=os.path.join("model",MODEL_NAME)
-
-    model=get_model(IMG_SIZE,no_of_fruits,LR)
-
-    model.load(model_save_at)
-    labels=list(np.load('labels.npy'))
+    # Preprocess the image if necessary, matching the model's input
+    img_array = np.expand_dims(img_resized, axis=0)
     
-    img=cv2.imread(test_data)
-    img1=cv2.resize(img,(IMG_SIZE,IMG_SIZE))
-    model_out=model.predict([img1])
-    result=np.argmax(model_out)
-    name=labels[result]
-    mass=round(mass(result+1,img),2)
+    # Predict label
+    predictions = model.predict(img_array)
+    result = np.argmax(predictions)
+    label_name = labels[result]
     
-    return name, mass
+    # Estimate mass
+    mass = mass_main(result, test_image)
 
+    # If mass could not be estimated, return a message
+    if mass is None:
+        return label_name, None
+    else:
+        return label_name, round(mass, 2)
 
 
 def get_diet_recommendation(predicted_item, health_goal, GOOGLE_API_KEY):
@@ -353,30 +337,46 @@ elif app_mode == "Prediction":
 
     if st.session_state.prediction_made:
 
-        st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item} of {st.session_state.mass:.2f} gms mass.")
-        nutrition_data = get_nutritional_info(st.session_state.predicted_item, result_mass)
-        if nutrition_data:
-                st.subheader(f"Nutritional Information for {st.session_state.predicted_item.capitalize()}:")
-                for food in nutrition_data['foods']:
-                    serving_qty = food['serving_qty']
-                    serving_unit = food['serving_unit']
-                    serving_weight = food['serving_weight_grams']
+    st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item}.")
+    
+    # Call the nutritional information API
+    nutrition_data = get_nutritional_info(st.session_state.predicted_item)
+    
+    if nutrition_data:
+        st.subheader(f"Nutritional Information for {st.session_state.predicted_item.capitalize()}:")
+        for food in nutrition_data['foods']:
+            serving_qty = food['serving_qty']
+            serving_unit = food['serving_unit']
+            serving_weight = food['serving_weight_grams']
+            
+            # If mass estimation was successful, adjust values accordingly
+            if st.session_state.mass is not None:
+                nutrition_info = {
+                    "Nutrient": ["Serving Size", "Calories (kcal)", "Total Fat (g)", "Carbohydrates (g)", "Protein (g)"],
+                    "Value": [
+                        f"{serving_qty} {serving_unit} ({serving_weight} g)",
+                        round(food['nf_calories'] / serving_weight * st.session_state.mass, 2),
+                        round(food['nf_total_fat'] / serving_weight * st.session_state.mass, 2),
+                        round(food['nf_total_carbohydrate'] / serving_weight * st.session_state.mass, 2),
+                        round(food['nf_protein'] / serving_weight * st.session_state.mass, 2)
+                    ]
+                }
+            else:
+                # If mass estimation failed, return the original values
+                nutrition_info = {
+                    "Nutrient": ["Serving Size", "Calories (kcal)", "Total Fat (g)", "Carbohydrates (g)", "Protein (g)"],
+                    "Value": [
+                        f"{serving_qty} {serving_unit} ({serving_weight} g)",
+                        round(food['nf_calories'], 2),
+                        round(food['nf_total_fat'], 2),
+                        round(food['nf_total_carbohydrate'], 2),
+                        round(food['nf_protein'], 2)
+                    ]
+                }
 
-                    nutrition_info = {
-                        "Nutrient": ["Serving Size", "Calories (kcal)", "Total Fat (g)", "Carbohydrates (g)", "Protein (g)"],
-                        "Value": [
-                            f"{serving_qty} {serving_unit} ({serving_weight} g)",
-                            round(food['nf_calories'] / serving_weight * result_mass, 2),
-                            round(food['nf_total_fat'] / serving_weight * result_mass, 2),
-                            round(food['nf_total_carbohydrate'] / serving_weight * result_mass, 2),
-                            round(food['nf_protein'] / serving_weight * result_mass, 2)
-                        ]
-                    }
-
-                    nutrition_df = pd.DataFrame(nutrition_info)
-
-                    
-                    st.table(nutrition_df)
+            nutrition_df = pd.DataFrame(nutrition_info)
+        st.table(nutrition_df)
+        
         st.subheader("Personalized Diet Recommendation")
         st.session_state.health_goal = st.radio("Select Your Health Goal", 
                                                 ("Select your health goal", "Muscle Building", "Fat Loss", "Weight Gain"), 
