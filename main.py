@@ -9,7 +9,7 @@ import google.generativeai as genai
 from gtts import gTTS
 import tempfile
 import re
-from cv2 import cv2
+import cv2
 import os
 import tflearn
 from tflearn.layers.conv import conv_2d, max_pool_2d
