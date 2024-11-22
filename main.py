@@ -26,11 +26,13 @@ genai.configure(api_key="AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY")
 
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-IMG_SIZE = 64
+IMG_SIZE = 224
 LR = 1e-3
 
-with open('labels.txt', 'r') as file:
-    labels = [line.strip() for line in file.readlines()]
+labels = np.load('labels.npy')  # Load labels from .npy file
+
+# with open('labels.txt', 'r') as file:
+#     labels = [line.strip() for line in file.readlines()]
 
 # Density dictionary (based on your previous setup)
 density_dict = {
@@ -65,7 +67,8 @@ def get_nutritional_info(item):
 # Load the TensorFlow model
 def load_model():
     try:
-        model = tf.keras.models.load_model("updated_model.keras")
+        model = tf.keras.models.load_model("fruit_classifier_optimized.keras")
+        # model = tf.keras.models.load_model("updated_model.keras")
         return model
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
@@ -75,123 +78,98 @@ def load_model():
 
 #image_segment
 def getAreaOfFood(image):
-    data=os.path.join(os.getcwd(),"images")
-    if os.path.exists(data):
-        print('folder exist for images at ',data)
-    else:
-        os.mkdir(data)
-        print('folder created for images at ',data)
-        
-    cv2.imwrite('{}\\1 original image.jpg'.format(data),image)
-    img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    cv2.imwrite('{}\\2 original image BGR2GRAY.jpg'.format(data),img)
-    img_filt = cv2.medianBlur( img, 5)
-    cv2.imwrite('{}\\3 img_filt.jpg'.format(data),img_filt)
-    img_th = cv2.adaptiveThreshold(img_filt,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,21,2)
-    cv2.imwrite('{}\\4 img_th.jpg'.format(data),img_th)
-    contours, hierarchy = cv2.findContours(img_th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE) #make change here
+    try:
+        data = os.path.join(os.getcwd(), "images")
+        if not os.path.exists(data):
+            os.mkdir(data)
 
+        cv2.imwrite(f'{data}\\1_original_image.jpg', image)
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        img_filt = cv2.medianBlur(img, 5)
+        img_th = cv2.adaptiveThreshold(img_filt, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 2)
 
-	# find contours. sort. and find the biggest contour. the biggest contour corresponds to the plate and fruit.
-    mask = np.zeros(img.shape, np.uint8)
-    largest_areas = sorted(contours, key=cv2.contourArea)
-    cv2.drawContours(mask, [largest_areas[-1]], 0, (255,255,255,255), -1)
-    cv2.imwrite('{}\\5 mask.jpg'.format(data),mask)
-    img_bigcontour = cv2.bitwise_and(image,image,mask = mask)
-    cv2.imwrite('{}\\6 img_bigcontour.jpg'.format(data),img_bigcontour)
+        # Find contours, get the largest ones
+        contours, _ = cv2.findContours(img_th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            st.warning("Could not find contours in the image.")
+            return None, None, None, None, None, None  # Graceful fallback
 
-	# convert to hsv. otsu threshold in s to remove plate
-    hsv_img = cv2.cvtColor(img_bigcontour, cv2.COLOR_BGR2HSV)
-    cv2.imwrite('{}\\7 hsv_img.jpg'.format(data),hsv_img)
-    h,s,v = cv2.split(hsv_img)
-    mask_plate = cv2.inRange(hsv_img, np.array([0,0,50]), np.array([200,90,250]))
-    cv2.imwrite('{}\\8 mask_plate.jpg'.format(data),mask_plate)
-    mask_not_plate = cv2.bitwise_not(mask_plate)
-    cv2.imwrite('{}\\9 mask_not_plate.jpg'.format(data),mask_not_plate)
-    fruit_skin = cv2.bitwise_and(img_bigcontour,img_bigcontour,mask = mask_not_plate)
-    cv2.imwrite('{}\\10 fruit_skin.jpg'.format(data),fruit_skin)
+        mask = np.zeros(img.shape, np.uint8)
+        mask_skin = np.zeros_like(img)
+        largest_areas = sorted(contours, key=cv2.contourArea, reverse=True)[:3]  # Top 3 largest contours
 
-	#convert to hsv to detect and remove skin pixels
-    hsv_img = cv2.cvtColor(fruit_skin, cv2.COLOR_BGR2HSV)
-    cv2.imwrite('{}\\11 hsv_img.jpg'.format(data),hsv_img)
-    skin = cv2.inRange(hsv_img, np.array([0,10,60]), np.array([10,160,255])) #Scalar(0, 10, 60), Scalar(20, 150, 255)
-    cv2.imwrite('{}\\12 skin.jpg'.format(data),skin)
-    not_skin = cv2.bitwise_not(skin); #invert skin and black
-    cv2.imwrite('{}\\13 not_skin.jpg'.format(data),not_skin)
-    fruit = cv2.bitwise_and(fruit_skin,fruit_skin,mask = not_skin) #get only fruit pixels
-    cv2.imwrite('{}\\14 fruit.jpg'.format(data),fruit)
-    
-    fruit_bw = cv2.cvtColor(fruit, cv2.COLOR_BGR2GRAY)
-    cv2.imwrite('{}\\15 fruit_bw.jpg'.format(data),fruit_bw)
-    fruit_bin = cv2.inRange(fruit_bw, 10, 255) #binary of fruit
-    cv2.imwrite('{}\\16 fruit_bw.jpg'.format(data),fruit_bin)
+        if len(largest_areas) >= 2:
+            cv2.drawContours(mask_skin, [largest_areas[-2]], 0, (255, 255, 255), -1)
+        else:
+            st.warning("Not enough areas found for the contours.")
+            return None, None, None, None, None, None
 
-	#erode before finding contours
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
-    erode_fruit = cv2.erode(fruit_bin,kernel,iterations = 1)
-    cv2.imwrite('{}\\17 erode_fruit.jpg'.format(data),erode_fruit)
+        cv2.drawContours(mask, [largest_areas[-1]], 0, (255, 255, 255), -1)
+        img_bigcontour = cv2.bitwise_and(image, image, mask=mask)
 
-	#find largest contour since that will be the fruit
-    img_th = cv2.adaptiveThreshold(erode_fruit,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
-    cv2.imwrite('{}\\18 img_th.jpg'.format(data),img_th)
-    contours, hierarchy = cv2.findContours(img_th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    mask_fruit = np.zeros(fruit_bin.shape, np.uint8)
-    largest_areas = sorted(contours, key=cv2.contourArea)
-    cv2.drawContours(mask_fruit, [largest_areas[-2]], 0, (255,255,255), -1)
-    cv2.imwrite('{}\\19 mask_fruit.jpg'.format(data),mask_fruit)
+        hsv_img = cv2.cvtColor(img_bigcontour, cv2.COLOR_BGR2HSV)
+        mask_plate = cv2.inRange(hsv_img, np.array([0, 0, 50]), np.array([200, 90, 250]))
+        mask_not_plate = cv2.bitwise_not(mask_plate)
+        fruit_skin = cv2.bitwise_and(img_bigcontour, img_bigcontour, mask=mask_not_plate)
 
-	#dilate now
-    kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
-    mask_fruit2 = cv2.dilate(mask_fruit,kernel2,iterations = 1)
-    cv2.imwrite('{}\\20 mask_fruit2.jpg'.format(data),mask_fruit2)
-    fruit_final = cv2.bitwise_and(image,image,mask = mask_fruit2)
-    cv2.imwrite('{}\\21 fruit_final.jpg'.format(data),fruit_final)
-    
-	#find area of fruit
-    img_th = cv2.adaptiveThreshold(mask_fruit2,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
-    cv2.imwrite('{}\\22 img_th.jpg'.format(data),img_th)
-    contours, hierarchy = cv2.findContours(img_th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    largest_areas = sorted(contours, key=cv2.contourArea)
-    fruit_contour = largest_areas[-2]
-    fruit_area = cv2.contourArea(fruit_contour)
+        hsv_img = cv2.cvtColor(fruit_skin, cv2.COLOR_BGR2HSV)
+        skin = cv2.inRange(hsv_img, np.array([0, 10, 60]), np.array([10, 160, 255]))
+        not_skin = cv2.bitwise_not(skin)
+        fruit = cv2.bitwise_and(fruit_skin, fruit_skin, mask=not_skin)
 
-	
-	#finding the area of skin. find area of biggest contour
-    skin2 = skin - mask_fruit2
-    cv2.imwrite('{}\\23 skin2.jpg'.format(data),skin2)
-	#erode before finding contours
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
-    skin_e = cv2.erode(skin2,kernel,iterations = 1)
-    cv2.imwrite('{}\\24 skin_e .jpg'.format(data),skin_e )
-    img_th = cv2.adaptiveThreshold(skin_e,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
-    cv2.imwrite('{}\\25 img_th.jpg'.format(data),img_th)
-    contours, hierarchy = cv2.findContours(img_th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    mask_skin = np.zeros(skin.shape, np.uint8)
-    largest_areas = sorted(contours, key=cv2.contourArea)
-    cv2.drawContours(mask_skin, [largest_areas[-2]], 0, (255,255,255), -1)
-    cv2.imwrite('{}\\26 mask_skin.jpg'.format(data),mask_skin)
-    
-    
-    skin_rect = cv2.minAreaRect(largest_areas[-2])
-    box = cv2.boxPoints(skin_rect)
-    box = np.int32(box)
-    mask_skin2 = np.zeros(skin.shape, np.uint8)
-    cv2.drawContours(mask_skin2,[box],0,(255,255,255), -1)
-    cv2.imwrite('{}\\27 mask_skin2.jpg'.format(data),mask_skin2)
-    
-    pix_height = max(skin_rect[1])
-    pix_to_cm_multiplier = 5.0/pix_height
-    skin_area = cv2.contourArea(box)
-    
-    
-    return fruit_area,fruit_bin ,fruit_final,skin_area, fruit_contour, pix_to_cm_multiplier
+        fruit_bw = cv2.cvtColor(fruit, cv2.COLOR_BGR2GRAY)
+        fruit_bin = cv2.inRange(fruit_bw, 10, 255)
+
+        # Erode to clean up the image before finding contours again
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        erode_fruit = cv2.erode(fruit_bin, kernel, iterations=1)
+
+        # Find the largest contour (fruit)
+        contours, _ = cv2.findContours(erode_fruit, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            st.warning("Could not find contours in the eroded image.")
+            return None, None, None, None, None, None
+
+        mask_fruit = np.zeros(fruit_bin.shape, np.uint8)
+        largest_areas = sorted(contours, key=cv2.contourArea)
+        cv2.drawContours(mask_fruit, [largest_areas[-2]], 0, (255, 255, 255), -1)
+
+        # Find the area of the fruit
+        fruit_contour = largest_areas[-2]
+        fruit_area = cv2.contourArea(fruit_contour)
+
+        # Find the area of the skin
+        skin2 = skin - mask_fruit
+        skin_e = cv2.erode(skin2, kernel, iterations=1)
+        contours, _ = cv2.findContours(skin_e, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        largest_areas = sorted(contours, key=cv2.contourArea)
+
+        # If the contours are not sufficient, return None
+        if len(largest_areas) < 2:
+            st.warning("Not enough areas found for skin.")
+            return None, None, None, None, None, None
+
+        skin_rect = cv2.minAreaRect(largest_areas[-2])
+        box = cv2.boxPoints(skin_rect)
+        pix_height = max(skin_rect[1])
+        pix_to_cm_multiplier = 5.0 / pix_height
+        skin_area = cv2.contourArea(box)
+
+        return fruit_area, fruit_bin, fruit, skin_area, fruit_contour, pix_to_cm_multiplier
+
+    except Exception as e:
+        st.error(f"Error in getAreaOfFood: {str(e)}")
+        return None, None, None, None, None, None
 
 
 skin_multiplier = 5*2.3
 
 def getVolume(label, area, skin_area, pix_to_cm_multiplier, fruit_contour):
+        if area is None or pix_to_cm_multiplier is None:
+            return None
         area_fruit = (area/skin_area)*skin_multiplier #area in cm^2
-        label = labels[label]
+        # label = labels[label]
+        label = 'labels.npy'
         volume = 100
         if label in ['apple', 'orange', 'kiwi', 'tomato', 'onion'] : #sphere-apple,tomato,orange,kiwi,onion
             radius = np.sqrt(area_fruit/np.pi)
@@ -224,6 +202,9 @@ def mass_main(result,img):
     fruit_areas,final_f,areaod,skin_areas, fruit_contours, pix_cm = getAreaOfFood(img_path)
     volume = getVolume(result, fruit_areas, skin_areas, pix_cm, fruit_contours)
     mass = getMass(result, volume)
+
+    if volume is None or mass is None:
+        return None
     fruit_volumes=volume
     fruit_mass=mass
     return fruit_mass
@@ -305,14 +286,14 @@ elif app_mode == "Prediction":
         if test_image_cam is not None:
             st.session_state.test_image = test_image_cam 
             if st.button("Show Image", key="cam"):
-                st.image(st.session_state.test_image, use_column_width=True)
+                st.image(st.session_state.test_image, use_container_width=True)
 
     elif use_camera == "Upload an Image":
         test_image_up = st.file_uploader("Choose an Image:")
         if test_image_up is not None:
             st.session_state.test_image = test_image_up  
             if st.button("Show Image", key="upload"):
-                st.image(st.session_state.test_image, use_column_width=True)
+                st.image(st.session_state.test_image, use_container_width=True)
 
     if st.session_state.test_image is not None:
         if isinstance(st.session_state.test_image, bytes):  # Camera input gives bytes
@@ -332,7 +313,7 @@ elif app_mode == "Prediction":
 
     if st.session_state.prediction_made:
 
-        st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item}.")
+        st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item} of {st.session_state.mass}gms.")
     
     # Call the nutritional information API
     nutrition_data = get_nutritional_info(st.session_state.predicted_item)
