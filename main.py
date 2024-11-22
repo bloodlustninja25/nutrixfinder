@@ -11,10 +11,6 @@ import tempfile
 import re
 import cv2
 import os
-import tflearn
-from tflearn.layers.conv import conv_2d, max_pool_2d
-from tflearn.layers.core import input_data, dropout, fully_connected
-from tflearn.layers.estimator import regression
 import io
 from PIL import Image
 
@@ -30,7 +26,7 @@ genai.configure(api_key="AIzaSyDxgSJn7VwIMQCYMFG1dNGYulARUgEYVrY")
 
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-IMG_SIZE = 400
+IMG_SIZE = 64
 LR = 1e-3
 
 with open('labels.txt', 'r') as file:
@@ -178,7 +174,7 @@ def getAreaOfFood(image):
     
     skin_rect = cv2.minAreaRect(largest_areas[-2])
     box = cv2.boxPoints(skin_rect)
-    box = np.int0(box)
+    box = np.int32(box)
     mask_skin2 = np.zeros(skin.shape, np.uint8)
     cv2.drawContours(mask_skin2,[box],0,(255,255,255), -1)
     cv2.imwrite('{}\\27 mask_skin2.jpg'.format(data),mask_skin2)
@@ -194,24 +190,24 @@ def getAreaOfFood(image):
 skin_multiplier = 5*2.3
 
 def getVolume(label, area, skin_area, pix_to_cm_multiplier, fruit_contour):
-	area_fruit = (area/skin_area)*skin_multiplier #area in cm^2
-    label = labels[label]
-	volume = 100
-	if label in ['apple', 'orange', 'kiwi', 'tomato', 'onion'] : #sphere-apple,tomato,orange,kiwi,onion
-		radius = np.sqrt(area_fruit/np.pi)
-		volume = (4/3)*np.pi*radius*radius*radius
-		#print (area_fruit, radius, volume, skin_area)
-    
-	elif label in ['banana', 'cucumber', 'carrot']: #cylinder like banana, cucumber, carrot
-		fruit_rect = cv2.minAreaRect(fruit_contour)
-		height = max(fruit_rect[1])*pix_to_cm_multiplier
-		radius = area_fruit/(2.0*height)
-		volume = np.pi*radius*radius*height
-		
-	if (label==4 and area_fruit < 30) : # carrot
-		volume = area_fruit*0.5 #assuming width = 0.5 cm
-	
-	return volume
+        area_fruit = (area/skin_area)*skin_multiplier #area in cm^2
+        label = labels[label]
+        volume = 100
+        if label in ['apple', 'orange', 'kiwi', 'tomato', 'onion'] : #sphere-apple,tomato,orange,kiwi,onion
+            radius = np.sqrt(area_fruit/np.pi)
+            volume = (4/3)*np.pi*radius*radius*radius
+            #print (area_fruit, radius, volume, skin_area)
+        
+        elif label in ['banana', 'cucumber', 'carrot']: #cylinder like banana, cucumber, carrot
+            fruit_rect = cv2.minAreaRect(fruit_contour)
+            height = max(fruit_rect[1])*pix_to_cm_multiplier
+            radius = area_fruit/(2.0*height)
+            volume = np.pi*radius*radius*height
+            
+        if (label==4 and area_fruit < 30) : # carrot
+            volume = area_fruit*0.5 #assuming width = 0.5 cm
+        
+        return volume
 
 def getMass(label, volume):  # volume in cm^3
     if label in density_dict:
@@ -234,8 +230,7 @@ def mass_main(result,img):
 
 def get_name_mass(test_image):
     model = load_model()
-    img = cv2.imread(test_image)
-    img_resized = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+    img_resized = cv2.resize(test_image, (IMG_SIZE, IMG_SIZE))
 
     # Preprocess the image if necessary, matching the model's input
     img_array = np.expand_dims(img_resized, axis=0)
@@ -337,7 +332,7 @@ elif app_mode == "Prediction":
 
     if st.session_state.prediction_made:
 
-    st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item}.")
+        st.success(f"NutriFinder is predicting it's a {st.session_state.predicted_item}.")
     
     # Call the nutritional information API
     nutrition_data = get_nutritional_info(st.session_state.predicted_item)
